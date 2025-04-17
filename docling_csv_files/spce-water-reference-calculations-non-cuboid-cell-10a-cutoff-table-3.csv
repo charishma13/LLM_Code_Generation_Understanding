@@ -1,0 +1,7 @@
+,0,1,2,3
+0,Name,Symbol,Value,Units
+1,Boltzmann Constant,kB,1.380649E-23,J/K
+2,Avogadro Constant,Na,6.02214076E+23,mol-1
+3,Planck constant,h,6.62607015E-34,J s
+4,Elementary charge,e,1.602176634E-19,C
+5,Permittivity of Vacuum,ε0,8.8541878128E-12,C2/(J m)

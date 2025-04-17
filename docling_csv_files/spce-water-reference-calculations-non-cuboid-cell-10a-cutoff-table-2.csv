@@ -1,0 +1,9 @@
+,0,1
+0,α,0.2850/Å 
+1,kmax,7 ; also only include k for which k2 < ksqmax. [See note below]
+2,rcut,10 Å
+3,Truncation, 
+4, Dispersion,"Truncate at rcut, apply analytic long-range corrections"
+5, Coulomb,Truncate real-space term at rcut
+6,Boundary Conditions,Periodic and tin-foil (conducting) boundary conditions for all Cartesian Directions
+7,erfc(x),"Implementation of Numerical Recipes ERFCC function; Ref. 7, page 164."

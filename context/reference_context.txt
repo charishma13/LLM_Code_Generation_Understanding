@@ -1,0 +1,66 @@
+3. Ewald Summation Method
+The Coulombic energy, and long-range energies, may be computed using the Ewald Summation Technique, which replaces the true Coulomb potential with the following [2,3]:
+
+\Large \begin{eqnarray} E_{coulomb}\left(\mathbf{r}^N\right) & = & \dfrac{1}{2}  {\sum\limits_{\mathbf{n}}}^{\dagger}   \sum\limits_{j=1}^N \sum\limits_{l=1}^N 
+\dfrac{q_j q_l}{ 4 \pi \epsilon_0} \dfrac{\text{erfc}\left(\alpha \cdot \left| \mathbf{r}_{jl} + \mathbf{n}\right| \right)}{\left| \mathbf{r}_{jl} + \mathbf{n}\right|}\\ 
+&& +\dfrac{1}{2 \pi V} \sum\limits_{\mathbf{k} \neq \mathbf{0}} \dfrac{1}{k^2} \exp \left[-\left( \dfrac{\pi k}{\alpha} \right)^2 \right] \dfrac{1}{4 \pi \epsilon_0} \cdot \left|\sum\limits_{j=1}^N q_j \exp \left(2\pi i \mathbf{k} \cdot \mathbf{r}_j \right) \right|^2 \\ 
+&& - \dfrac{\alpha}{\sqrt{\pi}} \sum\limits_{j=1}^N \dfrac{q_j^2}{4 \pi \epsilon_0} \\ 
+&& -\dfrac{1}{2}  {\sum\limits_{j=1}^M}^{\dagger^{-1}}   \sum\limits_{\kappa=1}^{N_j} \sum\limits_{\lambda=1}^{N_j} \dfrac{q_{j_\kappa} q_{j_\lambda}}{ 4 \pi \epsilon_0} \dfrac{\text{erf}\left(\alpha \cdot \left| \mathbf{r}_{j_\kappa j_\lambda} \right| \right)}{\left| \mathbf{r}_{j_\kappa j_\lambda} \right|} 
+\end{eqnarray}
+
+The terms on the right hand side of the equality are 1) the real-space term Ereal, 2) the Fourier-space term, Efourier, 3) the self correction term Eself, and 4) the intramolecular term Eintra. We note that this form of the Ewald Summation 1) requires total charge neutrality for the configuration and 2) neglects the surface dipole term (equivalent to using the "tin-foil" or conducting surface boundary condition). The meaning of symbols in this equation are:
+
+n	Lattice vector of periodic cell images
+k	Fourier-space vector of periodic cell images
+k	modulus of k ; k2 = |k|2
+qj	Value of charge at site j
+α	Ewald damping parameter
+N	Total number of charged sites
+M	Total number of molecules
+Nj	Total number of charged sites in molecule j
+κ, λ	Indices of sites in a single molecule
+V	Volume of the simulation cell, LxLyLz
+ε0	Permittivity of vacuum (see below)
+i	Imaginary unit, (-1)1/2
+rj	Cartesian vector coordinate of site j
+rjl	rj -rl
+erf(x)	Error Function computed for abscissa x
+erfc(x)	Complimentary Error Function computed for abscissa x
+
+In this form, the superscript "†" (dagger) in Ereal indicates that the sum skips all pairs i=j inside the original simulation cell (n = 0). The superscript "†-1" in Eintra indicates that the sum is over site pairs within molecules in the original simulation cell. Additionally, the Fourier vectors (k) in this equation are composed of integer elements, e.g. k = 2ex+ey+4ez where ei is the unit vector for Cartesian direction i. The Fourier space term can alternatively be written using k vectors with elements proportional to 2π. In practice, the above equation is not how the Ewald Summation is actually implemented. Typically, one makes the following assumptions/reductions to simplify the summation:
+
+The real-space sum is done for the original simulation cell only, i.e. n=0.
+Site-site interactions in both Edisp and Ereal are truncated at a pre-defined cutoff rcut, where rcut ≤ min(Lx,Ly,Lz)/2. In practice, the damping parameter, α, is chosen so that contributions to the real-space term are negligible for rij > rcut.
+The Fourier space summation is truncated at a pre-defined maximum k or maximum value of k2.
+Thus, the practical implementation of the Ewald Summation is [3]:
+
+\Large \begin{eqnarray} E_{coulomb}\left(\mathbf{r}^N\right) & = & 
+\sum\limits_{j}  \sum\limits_{l>j} 
+\dfrac{q_j q_l}{ 4 \pi \epsilon_0} \dfrac{\text{erfc}\left(\alpha \cdot  \left| \mathbf{r}_{jl} \right| \right)}{\left| \mathbf{r}_{jl} \right|} \Theta\left( r_{cut} - \left|\mathbf{r}_{jl}\right| \right) \\ 
+&& +\dfrac{1}{2 \pi V} \sum\limits_{\mathbf{k} \neq \mathbf{0}} \dfrac{1}{k^2} \exp \left[-\left( \dfrac{\pi k}{\alpha} \right)^2 \right] \dfrac{1}{4 \pi \epsilon_0} \cdot \left|\sum\limits_{j=1}^N q_j \exp \left(2\pi i \mathbf{k} \cdot \mathbf{r}_j \right) \right|^2 \\ 
+&& - \dfrac{\alpha}{\sqrt{\pi}} \sum\limits_j \dfrac{q_j^2}{4 \pi \epsilon_0} \\ 
+&& - \sum\limits_{j=1}^M  \sum\limits_{\kappa}  \sum\limits_{\lambda>\kappa} \dfrac{q_{j_\kappa} q_{j_\lambda}}{ 4 \pi \epsilon_0} \dfrac{\text{erf}\left(\alpha \cdot  \left| \mathbf{r}_{j_\kappa j_\lambda} \right| \right)}{\left| \mathbf{r}_{j_\kappa j_\lambda} \right|}  
+\end{eqnarray}
+
+We note that the real-space term now includes multiplication by the Heaviside Step Function, Θ(rcut - rij), which functionally truncates that term at rij = rcut.
+
+4. Parameters and Physical Constants for Reference Calculations herein
+For the reference calculations given below, we use the following parameters and apply certain conditions to the calculation of both the dispersion interactions and the Ewald Summation:
+
+α	5.6 / min(Lx,Ly,Lz)
+kmax	5 ; also only include k for which k2 < kmax2 +2, i.e. k2 < 27.
+rcut	10 Å
+Truncation	 
+ Dispersion	Truncate at rcut, apply analytic long-range corrections
+ Coulomb	Truncate real-space term at rcut
+Boundary Conditions	Periodic and tin-foil (conducting) boundary conditions for all Cartesian Directions
+erfc(x)	Implementation of Numerical Recipes ERFCC function; Ref. 4, page 164.
+
+The reference calculations given below were done using fundamental constants of physics and chemistry recommended by CODATA in 2010 [5,6]. We report these constants because the calculation of each contribution to the intermolecular energy will depend, ever so slightly, on the choice of fundamental physical constants and, in particular, the number of digits in those constants that are carried in the simulation. We use the full constants (untruncated) given in the CODATA 2010 recommendation:
+
+Name	Symbol	Value	Units
+Boltzmann Constant	kB	1.3806488E-23	J/K
+Avogadro Constant	Na	6.02214129E+23	mol-1
+Planck constant	h	6.62606957E-34	J s
+Elementary charge	e	1.602176565E-19	C
+Permittivity of Vacuum	ε0	8.854187817E-12	C2/(J m)

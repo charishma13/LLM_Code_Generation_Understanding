@@ -1,0 +1,12 @@
+Changes made on files:
+src/iteration_execution.py - modified fixed function list
+src/LLM_config.py - nist url change
+src/user_prompt.py - prompt for new task
+context/shorter_context.txt - added input file format and formulas
+src/feedback.py - check L2 norm
+src/LJ_Coulomb_LLM_Generated_code.py - incorporated L2 norm with tolerance and triclinic nist benchmarks
+
+No Changes on file:
+src/congig.py
+src/main.py
+src/rag_pipeline.py

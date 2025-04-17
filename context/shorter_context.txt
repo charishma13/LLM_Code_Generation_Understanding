@@ -1,0 +1,42 @@
+Illustration of input file format:
+
+            3.000000000000e+01       3.000000000000e+01       3.000000000000e+01
+            8.500000000000e+01       7.500000000000e+01       8.000000000000e+01
+         200
+    1      -1.073606597760e+01       1.432194046140e+01      -6.226901963110e+00    O
+    2      -1.661030970030e+01      -1.461065205480e+01      -5.798020258290e+00    H
+    3      -1.118063417070e+01       1.380841402440e+01      -6.960829561930e+00    H
+    4      -1.377161709910e+01      -8.711236583990e+00      -1.350200277380e+01    O
+    5      -1.347193958490e+01      -8.247621904110e+00      -1.433582218840e+01    H
+   
+Formula for the potential energy for the SPC/E model of water(latex form):
+
+\Large E_{total}\left( \mathbf{r}^N \right) = E_{disp}\left( \mathbf{r}^N \right) + E_{LRC} + E_{coulomb}\left( \mathbf{r}^N \right)
+
+The terms on the right-hand side of the equality to be computed are:
+
+1) The pair dispersion energy
+
+2) The long-range correction to the pair dispersion energy
+
+3) The Coulombic potential energy
+
+Formula for the Coulombic potential energy(latex form):
+
+\Large \begin{eqnarray} E_{coulomb}\left(\mathbf{r}^N\right) & = &
+\sum\limits_{j}  \sum\limits_{l>j}
+\dfrac{q_j q_l}{ 4 \pi \epsilon_0} \dfrac{\text{erfc}\left(\alpha \cdot  \left| \mathbf{r}_{jl} \right| \right)}{\left| \mathbf{r}_{jl} \right|} \Theta\left( r_{cut} - \left|\mathbf{r}_{jl}\right| \right) \\
+&& +\dfrac{1}{2 \pi V} \sum\limits_{\mathbf{k} \neq \mathbf{0}} \dfrac{1}{k^2} \exp \left[-\left( \dfrac{\pi k}{\alpha} \right)^2 \right] \dfrac{1}{4 \pi \epsilon_0} \cdot \left|\sum\limits_{j=1}^N q_j \exp \left(2\pi i \mathbf{k} \cdot \mathbf{r}_j \right) \right|^2 \\
+&& - \dfrac{\alpha}{\sqrt{\pi}} \sum\limits_j \dfrac{q_j^2}{4 \pi \epsilon_0} \\
+&& - \sum\limits_{j=1}^M  \sum\limits_{\kappa}  \sum\limits_{\lambda>\kappa} \dfrac{q_{j_\kappa} q_{j_\lambda}}{ 4 \pi \epsilon_0} \dfrac{\text{erf}\left(\alpha \cdot  \left| \mathbf{r}_{j_\kappa j_\lambda} \right| \right)}{\left| \mathbf{r}_{j_\kappa j_\lambda} \right|}
+\end{eqnarray}
+
+The Coulombic energy is computed using the Ewald Summation Method. The terms on the right hand side of the equality are
+
+1) The real-space term Ereal,
+
+2) The Fourier-space term, Efourier,
+
+3) The self-correction term Eself,
+
+4) The intramolecular term Eintra.

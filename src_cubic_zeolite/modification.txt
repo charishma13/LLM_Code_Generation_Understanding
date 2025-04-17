@@ -1,0 +1,83 @@
+Okay. We need to change direction. We will proceed with the code that only works with cubic boxes, and Brayden will generate new data for a cubic zeolite + water.
+
+It may take him a day or two to get you an example file, but can you start modifying the working code so it takes in a cubic zeolite?
+
+Water atoms need to now be labeled as HW and OW. The zeolite needs to have SiZ, OZ, AlZ, and HZ atoms. (you have a dictionary; extend it)
+
+atom_properties = {
+    'HW': {'type': 'HW', 'sigma': 3.165558, 'epsilon': 78.197431, 'charge': -0.8476, 'num_particles': 1},
+    'OW': {'type': 'OW', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+    'SiZ': {'type': 'SiZ', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+    'OZ': {'type': 'OZ', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+    'AlZ': {'type': 'AlZ', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+    'HZ': {'type': 'HZ', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+}
+
+Create a new function for "acid-base interaction", add docstrings as before - start getting that set up.
+
+# pairwise dispersion energy operation
+def acid_base_interaction(system_data, configuration, force_field):
+    """
+    Compute the total pair dispersion energy for a system of particles.
+    
+    Parameters:
+    - system_row: A row of the system DataFrame containing simulation properties.
+    - configuration: DataFrame with atom positions and types.
+    - force_field: DataFrame with force field parameters for atom types.
+
+    Returns:
+    - acid_base_interaction: float, the acid base interaction contribution of brosten-acidic zeolites.
+    """
+
+I suspect Brayden can get you that in a couple days. But data will be just like the water files --> a configuration + an energy.
+
+You won't get a breakdown of different energy components, though. Just the total energy.
+
+remove lj and coulumn part ?
+
+The base functions should remain unchanged.
+
+how ?
+
+We could even try sending less code to the LLM, too. 
+
+It doesn't need to know the full details about the LJ and Coulomb; it's not trying to fix those anymore. 
+
+It will modify acid_base() and numpy/BFGS should do the optimization.
+
+from scipy.optimize import minimize
+
+# x0 input
+
+result = minimize(
+    acid_base_interaction,
+    x0,
+    method='BFGS',
+    options={'disp': False}
+)
+
+The main functionality we need is parameter optimization. 
+
+The dictionary containing the LJ and Coulomb FF parameters for HW, OW, SiZ, OZ, AlZ, and HZ - we will keep HW, OW, SiZ, and OZ fixed, but during the SR, we want to be able to optimize AlZ and HZ parameters, as well as whatever parameters are imagined by the LLM for the acid/base interaction function.
+
+# optimize AlZ and HZ parameters - randomly ?
+
+Use SPC/E for water parameters, use TraPPE-Zeo for SiZ and OZ parameters. For the initial guess, copy SiZ parameters into AlZ (make q_AlZ = q_SiZ - 1), and set HZ parameters to sigma = 1, epsilon = 100, q = +1.
+
+Oh no, you just import optimization libraries and do it. numpy + BFGS is fine
+
+old presentation texts:
+
+First test case: H2O in Brønsted acidic zeolite
+
+Set ELJ, ECoulomb, Ebonds, Eangles to values from literature force fields
+Flexible water with F3C
+Flexible H3O+ with force field from Jang, Molinero, Cagin, Goddard, J Phys Chem, 2004 
+Zeolite with TraPPE-zeo for Si and O
+Use SR to find ?? contribution
+We assume this part will account for the acid/base interaction
+Kianoush and Fariha have finished code that extracts distances and angles
+DFT data from Bukowski group at JHU
+Waiting on SR code, then ready to test in small and larger systems
+
+

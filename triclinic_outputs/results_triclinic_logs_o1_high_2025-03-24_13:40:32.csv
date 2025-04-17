@@ -1,0 +1,1431 @@
+Run_ID,Iteration,Timestamp,model_name,reasoning_factor,context_type,Feedback,Human_Message,AI_Message,Updated_Coulomb_input
+1,2,2025-03-24_13:40:32,o1,high,short,"Result from the code generated:
+Your code resulted in the following error:
+Error
+Traceback (most recent call last):
+  File ""[MASKED_PATH] line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""index.pyx"", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File ""index.pyx"", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File ""pandas[MASKED_PATH] line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File ""pandas[MASKED_PATH] line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'Lx=Ly=Lz (Å)'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File ""<string>"", line 520, in <module>
+  File ""<string>"", line 96, in creating_dataframes
+  File ""[MASKED_PATH] line 4915, in apply
+    ).apply()
+      ^^^^^^^
+  File ""[MASKED_PATH] line 1427, in apply
+    return self.apply_standard()
+           ^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1507, in apply_standard
+    mapped = obj._map_values(
+             ^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 921, in _map_values
+    return algorithms.map_array(arr, mapper, na_action=na_action, convert=convert)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1743, in map_array
+    return lib.map_infer(values, mapper, convert=convert)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""lib.pyx"", line 2972, in pandas._libs.lib.map_infer
+  File ""<string>"", line 105, in <lambda>
+  File ""[MASKED_PATH] line 1184, in __getitem__
+    return self._getitem_tuple(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1368, in _getitem_tuple
+    return self._getitem_lowerdim(tup)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1065, in _getitem_lowerdim
+    section = self._getitem_axis(key, axis=i)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1431, in _getitem_axis
+    return self._get_label(key, axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 1381, in _get_label
+    return self.obj.xs(label, axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 4284, in xs
+    return self[key]
+           ~~~~^^^^^
+  File ""[MASKED_PATH] line 4090, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""[MASKED_PATH] line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'Lx=Ly=Lz (Å)'
+Review the specific part or function causing the error in the next iteration and correct it.
+","Please review the raw code and implement the missing functions needed to compute Coulombic contributions using the traditional Ewald Summation Method for given triclinic or monoclinic configurations data.
+
+import numpy as np
+import pandas as pd
+from scipy.special import erfc,erf
+import math 
+
+# defining all variables
+atom_properties = {
+    'O': {'type': 'O', 'sigma': 3.165558, 'epsilon': 78.197431, 'charge': -0.8476, 'num_particles': 1},
+    'H': {'type': 'H', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+}
+
+# Trying for small configurations first
+file_paths = [
+    #    '../data/spce_sample_config_periodic4.txt',
+    #    '../data/spce_sample_config_periodic2.txt',
+    #    '../data/spce_sample_config_periodic3.txt',
+        '../data/spce-sample-non-cuboid-configurations/spce_triclinic_sample_periodic3.txt'
+    ]
+
+NIST_TRICLINIC_SPC_E_Water = {'Configuration': [1, 2, 3, 4],
+ 'M (number of SPC/E molecules)': [400, 300, 200, 100],
+ 'Cell Type': ['Triclinic', 'Monoclinic', 'Triclinic', 'Monoclinic'],
+ 'Cell Side Lengths [a, b, c] (Å)': ['[30 Å, 30 Å, 30 Å]',
+  '[27 Å, 30 Å, 36 Å]',
+  '[30 Å, 30 Å, 30 Å]',
+  '[36 Å, 36 Å, 36 Å]'],
+ 'Cell Angles [α, β, γ] (degrees)': ['[100°, 95°, 75°]',
+  '[90°, 75°, 90°]',
+  '[85°, 75°, 80°]',
+  '[90°, 60°, 90°]'],
+ 'Number of Wave Vectors': [831, 1068, 838, 1028],
+ 'Edisp/kB (K)': [111992.0, 43286.0, 14403.3, 25025.1],
+ 'ELRC/kB (K)': [-4109.19, -2105.61, -1027.3, -163.091],
+ 'Ereal/kB (K)': [-727219.0, -476902.0, -297129.0, -171462.0],
+ 'Efourier/kB (K)': [44677.0, 44409.4, 28897.4, 22337.2],
+ 'Eself/kB (K)': [-11582000.0, -8686470.0, -5790980.0, -2895490.0],
+ 'Eintra/kB (K)': [11435400.0, 8576520.0, 5717680.0, 2858840.0],
+ 'Etotal/kB (K)': [-721254.0, -501259.0, -328153.0, -160912.0]}
+
+# Data processing
+
+def extracting_positions(input_file):
+        # Extract the positions from the .xyz file
+    with open(input_file, ""r"") as file:
+        lines = file.readlines()
+
+    data_lines = lines[2:]
+
+    data_list = []
+    for line in data_lines:
+        stripped_line = line.strip()
+        parts = stripped_line.split()
+        if len(parts) >= 5:  
+            try:
+                x, y, z = map(float, parts[1:4])
+                atom_type = parts[4]
+                data_list.append([x, y, z, atom_type])
+            except ValueError:
+                continue  
+
+    # Create a DataFrame with all configurations
+    columns = [""X"", ""Y"", ""Z"", ""Atom Type""]
+    configuration = pd.DataFrame(data_list, columns=columns)
+
+    configuration.index = range(1, len(configuration) + 1)
+
+    configuration[""Molecule""] = ((configuration.index - 1) // 3) + 1
+    
+    return configuration
+
+# create the target dataframes
+def creating_dataframes(file_paths, atom_properties, NIST_SPC_E_Water):
+    # Create the NIST_SPC_E_Water dataframe
+    NIST_SPC_E_Water = pd.DataFrame(NIST_SPC_E_Water)
+    NIST_SPC_E_Water['Sum of energies'] = (
+        NIST_SPC_E_Water['Edisp/kB (K)'] + NIST_SPC_E_Water['ELRC/kB (K)'] +
+        NIST_SPC_E_Water['Ereal/kB (K)'] + NIST_SPC_E_Water['Efourier/kB (K)'] +
+        NIST_SPC_E_Water['Eself/kB (K)'] + NIST_SPC_E_Water['Eintra/kB (K)']
+    )
+
+    # Creating the force_field dataframe
+    force_field = pd.DataFrame(atom_properties).from_dict(atom_properties, orient='index')
+
+    # Create the system dataframe containing some variables
+    system = pd.DataFrame(file_paths, columns=[""file_paths""])
+
+    # Use '(\d+)' and expand=False to get a single Series, fill missing values before converting
+    system['configuration #'] = (
+        system['file_paths']
+        .str.extract(r'(\d+)', expand=False)
+        .fillna('0')
+        .astype(int)
+    )
+
+    system[[""number of particles"", ""box length""]] = system[""configuration #""].apply(
+        lambda x: pd.Series({
+            ""number of particles"": float(
+                NIST_SPC_E_Water.loc[
+                    NIST_SPC_E_Water[""Configuration""] == x,
+                    ""M (number of SPC/E molecules)""
+                ].values[0]
+            ) if x in NIST_SPC_E_Water[""Configuration""].values else 0.0,
+            ""box length"": float(
+                NIST_SPC_E_Water.loc[
+                    NIST_SPC_E_Water[""Configuration""] == x,
+                    ""Lx=Ly=Lz (Å)""
+                ].values[0]
+            ) if x in NIST_SPC_E_Water[""Configuration""].values else 20.0
+        })
+    )
+
+    system['cutoff'] = 10
+
+    # Fix alpha so that alpha = 5.6 / L
+    system['alpha'] = system.apply(
+        lambda row: 5.6 / row['box length'] if row['box length'] != 0 else 0.28,
+        axis=1
+    )
+
+    system['kmax'] = 5
+    system['ε0'] = float(8.854187817E-12)
+    system['kB'] = float(1.3806488E-23)
+
+    return system, force_field, NIST_SPC_E_Water
+
+# pairwise dispersion energy functions
+
+# Minimum Image Distance function and Pair Dispersion Energy calculation (Code 3)
+def minimum_image_distance(r_ij, cell_length):
+    # Apply the minimum image convention to distances.
+    return r_ij - cell_length * np.round(r_ij / cell_length)
+
+# pairwise dispersion energy operation
+def pair_dispersion_energy(system_data, configuration, force_field):
+    """"""
+    Compute the total pair dispersion energy for a system of particles.
+    
+    Parameters:
+    - system_row: A row of the system DataFrame containing simulation properties.
+    - configuration: DataFrame with atom positions and types.
+    - force_field: DataFrame with force field parameters for atom types.
+
+    Returns:
+    - total_dispersion_energy: float, the total pair dispersion energy.
+    """"""
+    positions = configuration[['X', 'Y', 'Z']].values
+    atom_types = configuration['Atom Type'].values
+    cutoff = system_data['cutoff']
+    cell_length = system_data['box length']
+    num_atoms = len(positions)
+
+    total_dispersion_energy = 0.0
+
+    for i in range(num_atoms):
+        for j in range(i + 1, num_atoms):
+            r_ij = positions[i] - positions[j]
+            r_ij = minimum_image_distance(r_ij, cell_length)
+            distance = np.linalg.norm(r_ij)
+
+            if 0 < distance < cutoff:
+                type_i, type_j = atom_types[i], atom_types[j]
+
+                if type_i not in force_field.index or type_j not in force_field.index:
+                    continue
+
+                epsilon_i = force_field.loc[type_i, 'epsilon']
+                epsilon_j = force_field.loc[type_j, 'epsilon']
+                sigma_i = force_field.loc[type_i, 'sigma']
+                sigma_j = force_field.loc[type_j, 'sigma']
+
+                epsilon_ij = np.sqrt(epsilon_i * epsilon_j)
+                sigma_ij = (sigma_i + sigma_j) / 2.0
+                s_over_r = sigma_ij / distance
+
+                # Lennard-Jones potential
+                potential_energy = 4 * epsilon_ij * (s_over_r**12 - s_over_r**6)
+                total_dispersion_energy += potential_energy
+                
+    return total_dispersion_energy
+
+# Compute LRC energy
+def compute_lrc_energy(system_row, force_field):
+    """"""
+    Compute the Long-Range Correction (LRC) to the Lennard-Jones potential energy for a single system.
+    """"""
+    U_lrc_total = 0
+
+    # Iterate over atom types in the force field
+    for atom_type, atom_data in force_field.iterrows():
+        num_particles = system_row['number of particles'] * atom_data['num_particles']
+        
+        # Calculate the system's volume
+        volume = system_row['box length'] ** 3
+        rho = num_particles / volume
+
+        # Compute the LRC energy for each particle
+        total_lrc_energy = 0.0
+
+        # Get epsilon and sigma for each particle
+        sigma = atom_data['sigma']
+        epsilon = atom_data['epsilon']
+
+        # Apply cutoff and compute LRC energy for each particle
+        sigma_by_cutoff_3 = (sigma / system_row['cutoff']) ** 3
+        sigma_by_cutoff_9 = sigma_by_cutoff_3 ** 3
+
+        # LRC energy per particle
+        U_lrc_per_particle = (8 / 3) * np.pi * rho * epsilon * sigma**3 * (sigma_by_cutoff_9 / 3 - sigma_by_cutoff_3)
+        
+        # Multiply by number of particles
+        U_lrc_per_particle *= num_particles
+        U_lrc_total += U_lrc_per_particle
+
+    return U_lrc_total
+
+def compute_real_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19  # C
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23  # (1/(4 pi eps0)) / kB
+
+    alpha = system_data[""alpha""]  # 1/Å
+    cutoff = system_data[""cutoff""]  # Å
+    L = system_data[""box length""]  # Å
+
+    def min_image(dx, box_length):
+        return dx - round(dx / box_length) * box_length
+
+    positions = configuration[[""X"", ""Y"", ""Z""]].values
+    atom_types = configuration[""Atom Type""].values
+    mol_ids = configuration[""Molecule""].values
+    charges = np.array([force_field.loc[t, ""charge""] for t in atom_types])
+
+    n_atoms = len(positions)
+    real_energy = 0.0
+
+    for j in range(n_atoms - 1):
+        for l in range(j + 1, n_atoms):
+            # Skip intramolecular pairs
+            if mol_ids[j] == mol_ids[l]:
+                continue
+
+            dx = min_image(positions[l, 0] - positions[j, 0], L)
+            dy = min_image(positions[l, 1] - positions[j, 1], L)
+            dz = min_image(positions[l, 2] - positions[j, 2], L)
+            r = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if r < cutoff and r > 1e-14:
+                q_j = charges[j] * e_charge
+                q_l = charges[l] * e_charge
+                r_m = r * 1e-10
+                factor_erfc = erfc(alpha * r)
+                real_energy += coulomb_factor * (q_j * q_l / r_m) * factor_erfc
+
+    return real_energy
+
+def compute_fourier_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23  # 1/(4 pi eps0) in K·m / C^2
+
+    alpha = system_data[""alpha""]
+    kmax = system_data[""kmax""]
+    L = system_data[""box length""]
+    V_m = (L * 1e-10) ** 3
+
+    positions = configuration[[""X"", ""Y"", ""Z""]].values
+    atom_types = configuration[""Atom Type""].values
+    charges = np.array([force_field.loc[t, ""charge""] for t in atom_types])
+    charges_c = charges * e_charge
+
+    positions_m = positions * 1e-10
+    # 1/(4 pi eps0)*1/(2V) => coulomb_factor*(1/(2 V_m))
+    prefactor = coulomb_factor / (2.0 * V_m)
+
+    alpha_m = alpha * 1e10
+    fourier_energy = 0.0
+
+    max_sq = kmax * kmax + 2
+
+    for kx in range(-kmax, kmax + 1):
+        for ky in range(-kmax, kmax + 1):
+            for kz in range(-kmax, kmax + 1):
+                if (kx == 0 and ky == 0 and kz == 0):
+                    continue
+
+                k_int_sq = kx * kx + ky * ky + kz * kz
+                if k_int_sq >= max_sq:
+                    continue
+
+                kx_m = (2.0 * math.pi / (L * 1e-10)) * kx
+                ky_m = (2.0 * math.pi / (L * 1e-10)) * ky
+                kz_m = (2.0 * math.pi / (L * 1e-10)) * kz
+                k_sq = kx_m * kx_m + ky_m * ky_m + kz_m * kz_m
+                if k_sq < 1e-14:
+                    continue
+
+                real_part = 0.0
+                imag_part = 0.0
+                for j, (xj, yj, zj) in enumerate(positions_m):
+                    kr = kx_m*xj + ky_m*yj + kz_m*zj
+                    real_part += charges_c[j]*math.cos(kr)
+                    imag_part += charges_c[j]*math.sin(kr)
+
+                sk_sq = real_part*real_part + imag_part*imag_part
+                exponent = math.exp(- (k_sq)/(4.0*(alpha_m**2)))
+
+                # 4 pi / k^2
+                term = prefactor * (4.0 * math.pi / k_sq) * exponent * sk_sq
+
+                fourier_energy += term
+
+    return fourier_energy
+
+
+def compute_self_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23
+
+    alpha = system_data[""alpha""]
+    atom_types = configuration[""Atom Type""].values
+    charges = np.array([force_field.loc[t,""charge""] for t in atom_types])
+    charges_c = charges * e_charge
+
+    alpha_m = alpha*1e10
+
+    sum_q2 = np.sum(charges_c**2)
+
+    self_energy = - coulomb_factor * (alpha_m / math.sqrt(math.pi)) * sum_q2
+    return self_energy
+
+
+def compute_intra_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23
+
+    alpha = system_data[""alpha""]
+    positions = configuration[[""X"", ""Y"", ""Z""]].values
+    atom_types = configuration[""Atom Type""].values
+    charges = np.array([force_field.loc[t,""charge""] for t in atom_types])
+    mol_ids = configuration[""Molecule""].values
+
+    alpha_dimless = alpha
+
+    intra_energy = 0.0
+    unique_mols = np.unique(mol_ids)
+
+    for m_id in unique_mols:
+        idxs = np.where(mol_ids == m_id)[0]
+        n_mol_atoms = len(idxs)
+        for i in range(n_mol_atoms - 1):
+            for j in range(i+1, n_mol_atoms):
+                idx_i = idxs[i]
+                idx_j = idxs[j]
+                dx = positions[idx_j,0] - positions[idx_i,0]
+                dy = positions[idx_j,1] - positions[idx_i,1]
+                dz = positions[idx_j,2] - positions[idx_i,2]
+                r = math.sqrt(dx*dx + dy*dy + dz*dz)
+                if r > 1e-14:
+                    q_i = charges[idx_i]*e_charge
+                    q_j = charges[idx_j]*e_charge
+                    r_m = r*1e-10
+                    erf_val = erf(alpha_dimless*r)
+                    val = coulomb_factor*(q_i*q_j / r_m)*erf_val
+                    intra_energy -= val
+
+    return intra_energy
+
+
+# DataFrame Descriptions:
+
+# 1. NIST_TRICLINIC_SPC_E_Water DataFrame:
+#    - Contains thermodynamic properties of SPC/E water configurations in both triclinic and monoclinic cells.
+#    - Columns:
+#        - 'Configuration' (int): Configuration ID (1-4).
+#        - 'M (number of SPC/E molecules)' (int): Number of SPC/E molecules in the system.
+#        - 'Cell Type' (str): Type of the cell (e.g., Triclinic, Monoclinic).
+#        - 'Cell Side Lengths [a, b, c] (Å)' (list of strings): Cell side lengths in Ångströms.
+#        - 'Cell Angles [α, β, γ] (degrees)' (list of strings): Cell angles in degrees.
+#        - 'Number of Wave Vectors' (int): The number of wave vectors for each configuration.
+#        - 'Edisp/kB (K)' (float): Dispersion energy in Kelvin.
+#        - 'ELRC/kB (K)' (float): Long-range correction energy in Kelvin.
+#        - 'Ereal/kB (K)' (float): Real energy in Kelvin.
+#        - 'Efourier/kB (K)' (float): Fourier transform energy in Kelvin.
+#        - 'Eself/kB (K)' (float): Self-interaction energy in Kelvin.
+#        - 'Eintra/kB (K)' (float): Intra-molecular energy in Kelvin.
+#        - 'Etotal/kB (K)' (float): Total energy in Kelvin.
+
+# 2. force_field DataFrame:
+#    - Contains force field parameters for SPC/E water, specifically for oxygen ('O') and hydrogen ('H').
+#    - Columns:
+#        - 'type' (str): Atom type ('O' or 'H').
+#        - 'sigma' (float): Lennard-Jones parameter (Å).
+#        - 'epsilon' (float): Lennard-Jones well depth (K).
+#        - 'charge' (float): Partial charge (e).
+#        - 'num_particles' (int): Number of particles per molecule.
+
+# 3. system DataFrame:
+#    - Contains metadata about each system configuration.
+#    - Columns:
+#        - 'file_paths' (str): File names containing atomic configurations.
+#        - 'configuration #' (int): Extracted configuration number (1-4).
+#        - 'number of particles' (float): Number of molecules (from 'NIST_SPC_E_Water').
+#        - 'box length' (float): Box dimensions (from 'NIST_SPC_E_Water').
+#        - 'cutoff' (int): Fixed cutoff distance for interactions (10 Å).
+#        - 'alpha' (float): Ewald summation parameter (5.6 / min(a, b, c)).
+#        - 'kmax' (int): Maximum wave vector index (5); also, only include k for which k² < kmax² + 2, i.e., k² < 27.
+#        - 'ε0' (float): Permittivity of Vacuum (8.854187817E-12 C²/(J m)).
+#        - 'kB' (float): Boltzmann Constant (1.3806488E-23 J/K).
+
+# 4. configuration DataFrame (from 'extracting_positions'):
+#    - Created per file, containing atomic positions.
+#    - Columns:
+#        - 'X' (float): Atom coordinates in Ångströms.
+#        - 'Y' (float): Atom coordinates in Ångströms.
+#        - 'Z' (float): Atom coordinates in Ångströms.
+#        - 'Atom Type' (str): Type of atom ('O' or 'H').
+#        - 'Molecule' (int): Molecule index assigned based on position.
+
+
+system, force_field, NIST_TRICLINIC_SPC_E_Water = creating_dataframes(file_paths, atom_properties,NIST_TRICLINIC_SPC_E_Water)
+
+# Computing energies storing in results
+results = pd.DataFrame()
+
+results['Number of Particles'] = system['number of particles'].astype(int)
+
+# Calculate LRC energy for all system configurations
+results['lrc_Energies'] = system.apply(
+    lambda row: compute_lrc_energy(row, force_field), axis=1
+)
+
+# Calculate pairwise energy for all system configurations
+results['dispersion_energies'] = system['file_paths'].apply(
+    lambda file_path: pair_dispersion_energy(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path), 
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['real_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_real_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['fourier_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_fourier_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['self_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_self_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['intra_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_intra_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+def compare_LJ_coulomb_energy(df1, df2, tolerance=1e-4):
+    # Merge df1 and df2 based on the number of particles
+    df_merged = df1.merge(df2, left_on='Number of Particles', right_on='M (number of SPC/E molecules)', how='left')
+
+    # Initialize counters
+    matched_real = matched_fourier = matched_self = matched_intra = 0
+    matched_dispersion = matched_lrc = 0
+    not_matched_real = not_matched_fourier = not_matched_self = not_matched_intra = 0
+    not_matched_dispersion = not_matched_lrc = 0
+
+    # Initialize output lists
+    real_energy_output, fourier_energy_output = [], []
+    self_energy_output, intra_energy_output = [], []
+    lrc_energy_output, dispersion_energy_output = [], []
+
+    # Iterate over merged DataFrame
+    for idx, row in df_merged.iterrows():
+        # Extract computed values from df1
+        real_energy = row['real_energies']
+        fourier_energy = row['fourier_energies']
+        self_energy = row['self_energies']
+        intra_energy = row['intra_energies']
+        num_molecules = row['Number of Particles']
+        # LJ Components
+        lrc_energy = row['lrc_Energies']
+        dispersion_energy = row['dispersion_energies']
+
+        # Extract reference values from df2
+        if pd.isna(row['Ereal/kB (K)']):
+            continue  # Skip if no match is found in df2
+
+        nist_real_energy = float(row['Ereal/kB (K)'])
+        nist_fourier_energy = float(row['Efourier/kB (K)'])
+        nist_self_energy = float(row['Eself/kB (K)'])
+        nist_intra_energy = float(row['Eintra/kB (K)'])
+        nist_lrc_energy = float(row['ELRC/kB (K)'])
+        nist_dispersion_energy = float(row['Edisp/kB (K)'])
+
+        # Perform numeric comparisons with a tolerance
+        match_real = np.isclose(real_energy, nist_real_energy, atol=tolerance)
+        match_fourier = np.isclose(fourier_energy, nist_fourier_energy, atol=tolerance)
+        match_self = np.isclose(self_energy, nist_self_energy, atol=tolerance)
+        match_intra = np.isclose(intra_energy, nist_intra_energy, atol=tolerance)
+
+        # Perform numeric comparisons with a tolerance
+        match_dispersion = np.isclose(dispersion_energy, nist_dispersion_energy, atol=tolerance)
+        match_lrc = np.isclose(lrc_energy, nist_lrc_energy, atol=tolerance)
+
+        matched_real += int(match_real)
+        not_matched_real += int(not match_real)
+
+        matched_fourier += int(match_fourier)
+        not_matched_fourier += int(not match_fourier)
+
+        matched_self += int(match_self)
+        not_matched_self += int(not match_self)
+
+        matched_intra += int(match_intra)
+        not_matched_intra += int(not match_intra)
+
+        matched_dispersion += int(match_dispersion)
+        not_matched_dispersion += int(not match_dispersion)
+
+        matched_lrc += int(match_lrc)
+        not_matched_lrc += int(not match_lrc)
+
+        # Store formatted outputs
+        dispersion_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {dispersion_energy:.4E}, NIST: {nist_dispersion_energy:.4E}, Match: {match_dispersion}"")
+        lrc_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {lrc_energy:.4E}, NIST: {nist_lrc_energy:.4E}, Match: {match_lrc}"")
+        real_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {real_energy:.4E}, NIST: {nist_real_energy:.4E}, Match: {match_real}"")
+        fourier_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {fourier_energy:.4E}, NIST: {nist_fourier_energy:.4E}, Match: {match_fourier}"")
+        self_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {self_energy:.4E}, NIST: {nist_self_energy:.4E}, Match: {match_self}"")
+        intra_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {intra_energy:.4E}, NIST: {nist_intra_energy:.4E}, Match: {match_intra}"")
+
+    # Print final results
+    print()
+    print(""Lennard-Jones Pair Dispersion Energy Comparison:"")
+    print(*dispersion_energy_output, sep=chr(10))
+    print(""Lennard-Jones long-range corrections Energy Comparison:"")
+    print(*lrc_energy_output, sep=chr(10))
+    print(""Real Energy Comparison:"")
+    print(*real_energy_output, sep=chr(10))
+    print(""Fourier Energy Comparison:"")
+    print(*fourier_energy_output, sep=chr(10))
+    print(""Self Energy Comparison:"")
+    print(*self_energy_output, sep=chr(10))
+    print(""Intra Energy Comparison:"")
+    print(*intra_energy_output, sep=chr(10))
+    print()
+    print(f""Count of correct pairwise answers: {matched_dispersion}"")
+    print(f""Count of incorrect pairwise answers: {not_matched_dispersion}"")
+    print(f""Count of correct LRC answers: {matched_lrc}"")
+    print(f""Count of incorrect LRC answers: {not_matched_lrc}"")
+    print(f""Count of correct Real Energy answers: {matched_real}"")
+    print(f""Count of incorrect Real Energy answers: {not_matched_real}"")
+    print(f""Count of correct Fourier Energy answers: {matched_fourier}"")
+    print(f""Count of incorrect Fourier Energy answers: {not_matched_fourier}"")
+    print(f""Count of correct Self Energy answers: {matched_self}"")
+    print(f""Count of incorrect Self Energy answers: {not_matched_self}"")
+    print(f""Count of correct Intra Energy answers: {matched_intra}"")
+    print(f""Count of incorrect Intra Energy answers: {not_matched_intra}"")
+    print()
+
+    total_correct = matched_real + matched_fourier + matched_self + matched_intra + matched_dispersion + matched_lrc
+    total_incorrect = not_matched_real + not_matched_fourier + not_matched_self + not_matched_intra + not_matched_dispersion + not_matched_lrc
+
+    print(f""Total correct answers: {total_correct}"")
+    print(f""Total incorrect answers: {total_incorrect}"")
+
+
+# calling compare_coulomb_energy function
+compare_LJ_coulomb_energy(results, NIST_TRICLINIC_SPC_E_Water)
+
+Please review the provided code and implement the missing functions needed to compute Coulombic contributions using the traditional Ewald Summation Method for triclinic or monoclinic configurations data.
+
+Produce a JSON output in the following format:
+  ""Reasoning"": """",
+  ""Code"": """"
+
+Ensure that:
+1. The JSON output is **properly formatted** with **double quotes** around keys.
+2. The **Reasoning** section provides a concise and clear explanation of the approach taken.
+3. The **Code** section contains well-structured, indented, and syntactically correct Python (or the required language).
+4. The JSON output does **not** contain extraneous symbols such as triple backticks (` ``` `) or markdown indicators.
+5. The output should be **fully valid JSON** and parseable using `json.loads()`.
+
+Context:
+Illustration of input file format:
+
+            3.000000000000e+01       3.000000000000e+01       3.000000000000e+01
+            8.500000000000e+01       7.500000000000e+01       8.000000000000e+01
+         200
+    1      -1.073606597760e+01       1.432194046140e+01      -6.226901963110e+00    O
+    2      -1.661030970030e+01      -1.461065205480e+01      -5.798020258290e+00    H
+    3      -1.118063417070e+01       1.380841402440e+01      -6.960829561930e+00    H
+    4      -1.377161709910e+01      -8.711236583990e+00      -1.350200277380e+01    O
+    5      -1.347193958490e+01      -8.247621904110e+00      -1.433582218840e+01    H
+   
+Refer to the Coulomb Ewald summation formula below.
+
+Formula(latex form):
+
+\Large \begin{eqnarray} E_{coulomb}\left(\mathbf{r}^N\right) & = &
+\sum\limits_{j}  \sum\limits_{l>j}
+\dfrac{q_j q_l}{ 4 \pi \epsilon_0} \dfrac{\text{erfc}\left(\alpha \cdot  \left| \mathbf{r}_{jl} \right| \right)}{\left| \mathbf{r}_{jl} \right|} \Theta\left( r_{cut} - \left|\mathbf{r}_{jl}\right| \right) \\
+&& +\dfrac{1}{2 \pi V} \sum\limits_{\mathbf{k} \neq \mathbf{0}} \dfrac{1}{k^2} \exp \left[-\left( \dfrac{\pi k}{\alpha} \right)^2 \right] \dfrac{1}{4 \pi \epsilon_0} \cdot \left|\sum\limits_{j=1}^N q_j \exp \left(2\pi i \mathbf{k} \cdot \mathbf{r}_j \right) \right|^2 \\
+&& - \dfrac{\alpha}{\sqrt{\pi}} \sum\limits_j \dfrac{q_j^2}{4 \pi \epsilon_0} \\
+&& - \sum\limits_{j=1}^M  \sum\limits_{\kappa}  \sum\limits_{\lambda>\kappa} \dfrac{q_{j_\kappa} q_{j_\lambda}}{ 4 \pi \epsilon_0} \dfrac{\text{erf}\left(\alpha \cdot  \left| \mathbf{r}_{j_\kappa j_\lambda} \right| \right)}{\left| \mathbf{r}_{j_\kappa j_\lambda} \right|}
+\end{eqnarray}
+
+Explanation:
+
+We note that this form of the Ewald Summation
+
+1. requires total charge neutrality for the configuration and
+
+2. neglects the surface dipole term (equivalent to using the ""tin-foil"" or conducting surface boundary condition)
+
+Description:
+
+The terms on the right-hand side of the equality to be computed are:
+
+1) The real-space term Ereal,
+
+2) The Fourier-space term, Efourier,
+
+3) The self-correction term Eself,
+
+4) The intramolecular term Eintra.
+
+5) The Real Energy
+
+6) The dispersion Energy
+
+Notes:
+
+Primary task: 
+
+Write your code to modify the functions outlined above and incorporate any necessary additional functions.
+
+You may access the required columns from the given dataframes as parameters to the function to calculate the energies.
+
+Print Statements: Ensure that the print statements in the compare_LJ_coulomb_energy function remain exactly as they are, even as you make modifications to the other functions.
+
+Function Modifications: The output should always include Python code for modifying the respective functions.
+
+Flexibility in Code Changing: You are free to change other parts of the code, but the compare_LJ_coulomb_energy function must remain unchanged, as it manages the iteration loop.
+
+Strict Requirements:
+
+Function Names: Do not modify the function names or parameters.
+
+Preserve compare_LJ_coulomb_energy Function: The compare_LJ_coulomb_energy function should remain unchanged, as it controls the iteration loop.
+
+Iteration Notes: 
+
+Iterative Process: If multiple functions are provided to solve the task, work through them one by one in each iteration.
+
+Automated Iteration: The iteration loop will continue until the desired outcome is achieved.
+
+Feedback Integration: When feedback is provided, ensure you proceed with the next steps based on the iteration results and the correct answers generated.
+
+
+
+","{
+  ""Reasoning"": ""To handle triclinic or monoclinic cells, we must generalize the minimum-image convention and the construction of reciprocal vectors for the Ewald summation. First, we parse the cell side lengths (a, b, c) and angles (α, β, γ) from the input file. Next, we build a 3×3 “box matrix” that maps fractional to Cartesian coordinates and compute its inverse for the triclinic minimum-image transformations. In real space, we transform any displacement vector into fractional coordinates, apply a standard periodic shift (subtracting the nearest integer), then map back to Cartesian coordinates. In reciprocal space, we build the reciprocal lattice vectors from the inverse of the box matrix and iterate over those vectors whose magnitudes are within the chosen cutoff (k² < kmax² + 2). This way, the traditional Ewald sum method equally applies to non-orthorhombic cells, just as it does to cubic cells. Below are the added and modified functions for reading box parameters, building box matrices, adjusting the minimum-image distance, and modifying the real and reciprocal parts of the Ewald summation if the cell type is 'Triclinic' or 'Monoclinic'. The compare_LJ_coulomb_energy function remains unchanged."",
+  ""Code"": ""import numpy as np\nimport math\nfrom scipy.special import erfc, erf\n\n# New function to parse box parameters from the first lines of the input file\n# The file format example:\n#   Line 0:  a   b   c\n#   Line 1:  alpha   beta    gamma\n#   Line 2:  number_of_molecules\n#   Lines 3+: atomic positions\n\ndef read_box_params(input_file):\n    with open(input_file, 'r') as f:\n        lines = f.readlines()\n    # Parse side lengths\n    a_vals = lines[0].split()\n    a = float(a_vals[0])\n    b = float(a_vals[1])\n    c = float(a_vals[2])\n    # Parse angles\n    ang_vals = lines[1].split()\n    alpha = float(ang_vals[0])\n    beta = float(ang_vals[1])\n    gamma = float(ang_vals[2])\n    # Number of molecules can also be read here, though we may not store it\n    return a, b, c, alpha, beta, gamma\n\n# Function to build the 3x3 box matrix and its inverse\n# for triclinic or monoclinic cells\n\ndef build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg):\n    alpha = math.radians(alpha_deg)\n    beta = math.radians(beta_deg)\n    gamma = math.radians(gamma_deg)\n    box = np.zeros((3, 3), dtype=float)\n\n    # box[0,0] = a\n    # box[0,1] = b cos(gamma)\n    # box[1,1] = b sin(gamma)\n    # For the z-component:\n    #   box[0,2] = c cos(beta)\n    #   box[1,2] = c( cos(alpha) - cos(beta)cos(gamma) ) / sin(gamma)\n    #   box[2,2] = c * sqrt( 1 - cos^2(alpha) - cos^2(beta)\n    #                        - cos^2(gamma) + 2cos(alpha)cos(beta)cos(gamma) ) / sin(gamma)\n\n    box[0,0] = a\n    box[0,1] = b * math.cos(gamma)\n    box[1,1] = b * math.sin(gamma)\n    box[0,2] = c * math.cos(beta)\n    box[1,2] = c * ( (math.cos(alpha) - math.cos(beta)*math.cos(gamma)) / math.sin(gamma) )\n\n    # Computation for box[2,2] using the standard formula\n    cos_alpha = math.cos(alpha)\n    cos_beta = math.cos(beta)\n    cos_gamma = math.cos(gamma)\n    sin_gamma = math.sin(gamma)\n    term = 1.0 - cos_alpha**2 - cos_beta**2 - cos_gamma**2 + 2.0*cos_alpha*cos_beta*cos_gamma\n    box[2,2] = c * math.sqrt(term) / sin_gamma\n\n    box_inv = np.linalg.inv(box)\n    return box, box_inv\n\n# Minimum-image distance for triclinic or monoclinic\n\ndef minimum_image_distance_triclinic(r_ij, box, box_inv):\n    # Convert the real-space displacement to fractional\n    frac = np.dot(box_inv, r_ij)\n    # Shift fractional coords by the nearest integer\n    frac -= np.round(frac)\n    # Go back to Cartesian\n    r_ij_mi = np.dot(box, frac)\n    return r_ij_mi\n\n# Modified extracting_positions to also read box data\n# The user can adapt how these values are stored into 'configuration' or in 'system_data'\n\ndef extracting_positions(input_file):\n    a, b, c, alpha, beta, gamma = read_box_params(input_file)\n    with open(input_file, 'r') as file:\n        lines = file.readlines()\n    # Skip first three lines containing box info and number of molecules\n    data_lines = lines[3:]\n\n    data_list = []\n    for line in data_lines:\n        stripped_line = line.strip()\n        parts = stripped_line.split()\n        if len(parts) >= 5:\n            try:\n                x, y, z = map(float, parts[1:4])\n                atom_type = parts[4]\n                data_list.append([x, y, z, atom_type])\n            except ValueError:\n                continue\n\n    columns = ['X', 'Y', 'Z', 'Atom Type']\n    configuration = pd.DataFrame(data_list, columns=columns)\n    configuration.index = range(1, len(configuration) + 1)\n    # Assign Molecule IDs assuming 3 atoms per water\n    configuration['Molecule'] = ((configuration.index - 1) // 3) + 1\n\n    # Store the cell data in the DataFrame or attach as attributes\n    configuration.attrs['a'] = a\n    configuration.attrs['b'] = b\n    configuration.attrs['c'] = c\n    configuration.attrs['alpha'] = alpha\n    configuration.attrs['beta'] = beta\n    configuration.attrs['gamma'] = gamma\n\n    return configuration\n\n# Below, we show how we modify the compute_real_energies function\n# to handle non-orthorhombic cells when the cell type is set\n# (Triclinic or Monoclinic). We assume system_data contains 'Cell Type'.\n\n\ndef compute_real_energies(system_data, configuration, force_field):\n    e_charge = 1.602176634e-19  # C\n    coulomb_factor = 8.9875517923e9 / 1.3806488e-23  # (1/(4 pi eps0)) / kB\n\n    alpha = system_data['alpha']  # 1/Å\n    cutoff = system_data['cutoff']  # Å\n\n    # We retrieve the cell parameters from configuration.attrs\n    # If the cell is cubic, the original method is used.\n    # Otherwise, we build the triclinic box.\n\n    if 'Cell Type' in system_data and system_data['Cell Type'] in ['Triclinic', 'Monoclinic']:\n        a = configuration.attrs['a']\n        b = configuration.attrs['b']\n        c = configuration.attrs['c']\n        alpha_deg = configuration.attrs['alpha']\n        beta_deg = configuration.attrs['beta']\n        gamma_deg = configuration.attrs['gamma']\n        box, box_inv = build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg)\n        def min_image_func(dr):\n            return minimum_image_distance_triclinic(dr, box, box_inv)\n    else:\n        # Default to original cubic approach\n        L = system_data['box length']\n        def min_image_func(dr):\n            return dr - np.round(dr / L) * L\n\n    positions = configuration[['X', 'Y', 'Z']].values\n    atom_types = configuration['Atom Type'].values\n    mol_ids = configuration['Molecule'].values\n    charges = np.array([force_field.loc[t, 'charge'] for t in atom_types])\n\n    n_atoms = len(positions)\n    real_energy = 0.0\n\n    for j in range(n_atoms - 1):\n        for l in range(j + 1, n_atoms):\n            # Skip intramolecular pairs\n            if mol_ids[j] == mol_ids[l]:\n                continue\n\n            r_ij = positions[l] - positions[j]\n            r_ij_mi = min_image_func(r_ij)\n            r = np.linalg.norm(r_ij_mi)\n            if 1e-14 < r < cutoff:\n                q_j = charges[j] * e_charge\n                q_l = charges[l] * e_charge\n                r_m = r * 1e-10\n                factor_erfc = erfc(alpha * r)\n                real_energy += coulomb_factor * (q_j * q_l / r_m) * factor_erfc\n\n    return real_energy\n\n# Similarly, modify the compute_fourier_energies function to construct reciprocal vectors\n# for triclinic cells when needed.\n\ndef compute_fourier_energies(system_data, configuration, force_field):\n    e_charge = 1.602176634e-19\n    coulomb_factor = 8.9875517923e9 / 1.3806488e-23\n\n    alpha = system_data['alpha']\n    kmax = system_data['kmax']\n\n    # If we have triclinic or monoclinic, build box & reciprocal.\n    if 'Cell Type' in system_data and system_data['Cell Type'] in ['Triclinic', 'Monoclinic']:\n        a = configuration.attrs['a']\n        b = configuration.attrs['b']\n        c = configuration.attrs['c']\n        alpha_deg = configuration.attrs['alpha']\n        beta_deg = configuration.attrs['beta']\n        gamma_deg = configuration.attrs['gamma']\n        box, box_inv = build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg)\n        # The reciprocal box is 2*pi * (inv(box)^T)\n        reciprocal_box = 2.0 * math.pi * box_inv.T\n        # Volume in m^3:\n        # volume in A^3 = det(box), convert to m^3 by (1e-10)^3\n        volume_A3 = np.linalg.det(box)\n        V_m = volume_A3 * 1e-30\n    else:\n        L = system_data['box length']\n        # For a cubic cell, reciprocal vectors are multiples of 2*pi / L.\n        reciprocal_box = np.eye(3) * (2.0*math.pi / (L*1e-10))\n        V_m = (L*1e-10)**3\n\n    positions = configuration[['X', 'Y', 'Z']].values * 1e-10  # convert to meters\n    atom_types = configuration['Atom Type'].values\n    charges = np.array([force_field.loc[t, 'charge'] for t in atom_types])\n    charges_c = charges * e_charge\n\n    prefactor = coulomb_factor / (2.0 * V_m)\n    alpha_m = alpha * 1e10\n\n    fourier_energy = 0.0\n\n    # We'll generate integer ranges from -kmax..kmax for each dimension\n    # Then transform them via reciprocal_box to get the actual k-vector.\n    max_sq = kmax * kmax + 2\n\n    for kx in range(-kmax, kmax+1):\n        for ky in range(-kmax, kmax+1):\n            for kz in range(-kmax, kmax+1):\n                if kx == 0 and ky == 0 and kz == 0:\n                    continue\n                k_int = np.array([kx, ky, kz], dtype=float)\n                k_vec = np.dot(reciprocal_box, k_int)\n                k_sq = np.dot(k_vec, k_vec)\n                # Check k^2 < kmax^2 + 2 in integer space or in real k-vector? Here we do real k^2.\n                if k_sq < 1e-14:\n                    continue\n                # If needed, we can compare the integer magnitude, but we'll keep it as is.\n                if (kx*kx + ky*ky + kz*kz) >= max_sq:\n                    continue\n\n                real_part = 0.0\n                imag_part = 0.0\n                for j, (xj, yj, zj) in enumerate(positions):\n                    kr = k_vec[0]*xj + k_vec[1]*yj + k_vec[2]*zj\n                    real_part += charges_c[j]*math.cos(kr)\n                    imag_part += charges_c[j]*math.sin(kr)\n\n                sk_sq = real_part*real_part + imag_part*imag_part\n                exponent = math.exp(-k_sq/(4.0*(alpha_m**2)))\n                term = prefactor * (4.0 * math.pi / k_sq) * exponent * sk_sq\n                fourier_energy += term\n\n    return fourier_energy\n\n# We leave the rest of the code (e.g., compute_self_energies, compute_intra_energies)\n# unchanged, except that if needed, a similar approach can be applied wherever\n# a minimum-image or reciprocal lattice conversion is required.\n# The compare_LJ_coulomb_energy function remains exactly as is.\n""
+}","import numpy as np
+import pandas as pd
+from scipy.special import erfc,erf
+import math 
+
+# defining all variables
+atom_properties = {
+    'O': {'type': 'O', 'sigma': 3.165558, 'epsilon': 78.197431, 'charge': -0.8476, 'num_particles': 1},
+    'H': {'type': 'H', 'sigma': 0.000000, 'epsilon': 0.000000, 'charge': 0.4238, 'num_particles': 2},
+}
+
+# Trying for small configurations first
+file_paths = [
+    #    '../data/spce_sample_config_periodic4.txt',
+    #    '../data/spce_sample_config_periodic2.txt',
+    #    '../data/spce_sample_config_periodic3.txt',
+        '../data/spce-sample-non-cuboid-configurations/spce_triclinic_sample_periodic3.txt'
+    ]
+
+NIST_TRICLINIC_SPC_E_Water = {'Configuration': [1, 2, 3, 4],
+ 'M (number of SPC/E molecules)': [400, 300, 200, 100],
+ 'Cell Type': ['Triclinic', 'Monoclinic', 'Triclinic', 'Monoclinic'],
+ 'Cell Side Lengths [a, b, c] (Å)': ['[30 Å, 30 Å, 30 Å]',
+  '[27 Å, 30 Å, 36 Å]',
+  '[30 Å, 30 Å, 30 Å]',
+  '[36 Å, 36 Å, 36 Å]'],
+ 'Cell Angles [α, β, γ] (degrees)': ['[100°, 95°, 75°]',
+  '[90°, 75°, 90°]',
+  '[85°, 75°, 80°]',
+  '[90°, 60°, 90°]'],
+ 'Number of Wave Vectors': [831, 1068, 838, 1028],
+ 'Edisp/kB (K)': [111992.0, 43286.0, 14403.3, 25025.1],
+ 'ELRC/kB (K)': [-4109.19, -2105.61, -1027.3, -163.091],
+ 'Ereal/kB (K)': [-727219.0, -476902.0, -297129.0, -171462.0],
+ 'Efourier/kB (K)': [44677.0, 44409.4, 28897.4, 22337.2],
+ 'Eself/kB (K)': [-11582000.0, -8686470.0, -5790980.0, -2895490.0],
+ 'Eintra/kB (K)': [11435400.0, 8576520.0, 5717680.0, 2858840.0],
+ 'Etotal/kB (K)': [-721254.0, -501259.0, -328153.0, -160912.0]}
+
+# Data processing
+
+
+def extracting_positions(input_file):
+        # Extract the positions from the .xyz file
+    with open(input_file, ""r"") as file:
+        lines = file.readlines()
+
+    data_lines = lines[2:]
+
+    data_list = []
+    for line in data_lines:
+        stripped_line = line.strip()
+        parts = stripped_line.split()
+        if len(parts) >= 5:  
+            try:
+                x, y, z = map(float, parts[1:4])
+                atom_type = parts[4]
+                data_list.append([x, y, z, atom_type])
+            except ValueError:
+                continue  
+
+    # Create a DataFrame with all configurations
+    columns = [""X"", ""Y"", ""Z"", ""Atom Type""]
+    configuration = pd.DataFrame(data_list, columns=columns)
+
+    configuration.index = range(1, len(configuration) + 1)
+
+    configuration[""Molecule""] = ((configuration.index - 1) // 3) + 1
+    
+    return configuration
+
+# create the target dataframes
+def creating_dataframes(file_paths, atom_properties, NIST_SPC_E_Water):
+    # Create the NIST_SPC_E_Water dataframe
+    NIST_SPC_E_Water = pd.DataFrame(NIST_SPC_E_Water)
+    NIST_SPC_E_Water['Sum of energies'] = (
+        NIST_SPC_E_Water['Edisp/kB (K)'] + NIST_SPC_E_Water['ELRC/kB (K)'] +
+        NIST_SPC_E_Water['Ereal/kB (K)'] + NIST_SPC_E_Water['Efourier/kB (K)'] +
+        NIST_SPC_E_Water['Eself/kB (K)'] + NIST_SPC_E_Water['Eintra/kB (K)']
+    )
+
+    # Creating the force_field dataframe
+    force_field = pd.DataFrame(atom_properties).from_dict(atom_properties, orient='index')
+
+    # Create the system dataframe containing some variables
+    system = pd.DataFrame(file_paths, columns=[""file_paths""])
+
+    # Use '(\d+)' and expand=False to get a single Series, fill missing values before converting
+    system['configuration #'] = (
+        system['file_paths']
+        .str.extract(r'(\d+)', expand=False)
+        .fillna('0')
+        .astype(int)
+    )
+
+    system[[""number of particles"", ""box length""]] = system[""configuration #""].apply(
+        lambda x: pd.Series({
+            ""number of particles"": float(
+                NIST_SPC_E_Water.loc[
+                    NIST_SPC_E_Water[""Configuration""] == x,
+                    ""M (number of SPC/E molecules)""
+                ].values[0]
+            ) if x in NIST_SPC_E_Water[""Configuration""].values else 0.0,
+            ""box length"": float(
+                NIST_SPC_E_Water.loc[
+                    NIST_SPC_E_Water[""Configuration""] == x,
+                    ""Lx=Ly=Lz (Å)""
+                ].values[0]
+            ) if x in NIST_SPC_E_Water[""Configuration""].values else 20.0
+        })
+    )
+
+    system['cutoff'] = 10
+
+    # Fix alpha so that alpha = 5.6 / L
+    system['alpha'] = system.apply(
+        lambda row: 5.6 / row['box length'] if row['box length'] != 0 else 0.28,
+        axis=1
+    )
+
+    system['kmax'] = 5
+    system['ε0'] = float(8.854187817E-12)
+    system['kB'] = float(1.3806488E-23)
+
+    return system, force_field, NIST_SPC_E_Water
+
+# pairwise dispersion energy functions
+
+# Minimum Image Distance function and Pair Dispersion Energy calculation (Code 3)
+def minimum_image_distance(r_ij, cell_length):
+    # Apply the minimum image convention to distances.
+    return r_ij - cell_length * np.round(r_ij / cell_length)
+
+# pairwise dispersion energy operation
+def pair_dispersion_energy(system_data, configuration, force_field):
+    """"""
+    Compute the total pair dispersion energy for a system of particles.
+    
+    Parameters:
+    - system_row: A row of the system DataFrame containing simulation properties.
+    - configuration: DataFrame with atom positions and types.
+    - force_field: DataFrame with force field parameters for atom types.
+
+    Returns:
+    - total_dispersion_energy: float, the total pair dispersion energy.
+    """"""
+    positions = configuration[['X', 'Y', 'Z']].values
+    atom_types = configuration['Atom Type'].values
+    cutoff = system_data['cutoff']
+    cell_length = system_data['box length']
+    num_atoms = len(positions)
+
+    total_dispersion_energy = 0.0
+
+    for i in range(num_atoms):
+        for j in range(i + 1, num_atoms):
+            r_ij = positions[i] - positions[j]
+            r_ij = minimum_image_distance(r_ij, cell_length)
+            distance = np.linalg.norm(r_ij)
+
+            if 0 < distance < cutoff:
+                type_i, type_j = atom_types[i], atom_types[j]
+
+                if type_i not in force_field.index or type_j not in force_field.index:
+                    continue
+
+                epsilon_i = force_field.loc[type_i, 'epsilon']
+                epsilon_j = force_field.loc[type_j, 'epsilon']
+                sigma_i = force_field.loc[type_i, 'sigma']
+                sigma_j = force_field.loc[type_j, 'sigma']
+
+                epsilon_ij = np.sqrt(epsilon_i * epsilon_j)
+                sigma_ij = (sigma_i + sigma_j) / 2.0
+                s_over_r = sigma_ij / distance
+
+                # Lennard-Jones potential
+                potential_energy = 4 * epsilon_ij * (s_over_r**12 - s_over_r**6)
+                total_dispersion_energy += potential_energy
+                
+    return total_dispersion_energy
+
+# Compute LRC energy
+def compute_lrc_energy(system_row, force_field):
+    """"""
+    Compute the Long-Range Correction (LRC) to the Lennard-Jones potential energy for a single system.
+    """"""
+    U_lrc_total = 0
+
+    # Iterate over atom types in the force field
+    for atom_type, atom_data in force_field.iterrows():
+        num_particles = system_row['number of particles'] * atom_data['num_particles']
+        
+        # Calculate the system's volume
+        volume = system_row['box length'] ** 3
+        rho = num_particles / volume
+
+        # Compute the LRC energy for each particle
+        total_lrc_energy = 0.0
+
+        # Get epsilon and sigma for each particle
+        sigma = atom_data['sigma']
+        epsilon = atom_data['epsilon']
+
+        # Apply cutoff and compute LRC energy for each particle
+        sigma_by_cutoff_3 = (sigma / system_row['cutoff']) ** 3
+        sigma_by_cutoff_9 = sigma_by_cutoff_3 ** 3
+
+        # LRC energy per particle
+        U_lrc_per_particle = (8 / 3) * np.pi * rho * epsilon * sigma**3 * (sigma_by_cutoff_9 / 3 - sigma_by_cutoff_3)
+        
+        # Multiply by number of particles
+        U_lrc_per_particle *= num_particles
+        U_lrc_total += U_lrc_per_particle
+
+    return U_lrc_total
+
+def build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg):
+    alpha = math.radians(alpha_deg)
+    beta = math.radians(beta_deg)
+    gamma = math.radians(gamma_deg)
+    box = np.zeros((3, 3), dtype=float)
+
+    # box[0,0] = a
+    # box[0,1] = b cos(gamma)
+    # box[1,1] = b sin(gamma)
+    # For the z-component:
+    #   box[0,2] = c cos(beta)
+    #   box[1,2] = c( cos(alpha) - cos(beta)cos(gamma) ) / sin(gamma)
+    #   box[2,2] = c * sqrt( 1 - cos^2(alpha) - cos^2(beta)
+    #                        - cos^2(gamma) + 2cos(alpha)cos(beta)cos(gamma) ) / sin(gamma)
+
+    box[0,0] = a
+    box[0,1] = b * math.cos(gamma)
+    box[1,1] = b * math.sin(gamma)
+    box[0,2] = c * math.cos(beta)
+    box[1,2] = c * ( (math.cos(alpha) - math.cos(beta)*math.cos(gamma)) / math.sin(gamma) )
+
+    # Computation for box[2,2] using the standard formula
+    cos_alpha = math.cos(alpha)
+    cos_beta = math.cos(beta)
+    cos_gamma = math.cos(gamma)
+    sin_gamma = math.sin(gamma)
+    term = 1.0 - cos_alpha**2 - cos_beta**2 - cos_gamma**2 + 2.0*cos_alpha*cos_beta*cos_gamma
+    box[2,2] = c * math.sqrt(term) / sin_gamma
+
+    box_inv = np.linalg.inv(box)
+    return box, box_inv
+
+def minimum_image_distance_triclinic(r_ij, box, box_inv):
+    # Convert the real-space displacement to fractional
+    frac = np.dot(box_inv, r_ij)
+    # Shift fractional coords by the nearest integer
+    frac -= np.round(frac)
+    # Go back to Cartesian
+    r_ij_mi = np.dot(box, frac)
+    return r_ij_mi
+
+def compute_real_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19  # C
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23  # (1/(4 pi eps0)) / kB
+
+    alpha = system_data['alpha']  # 1/Å
+    cutoff = system_data['cutoff']  # Å
+
+    # We retrieve the cell parameters from configuration.attrs
+    # If the cell is cubic, the original method is used.
+    # Otherwise, we build the triclinic box.
+
+    if 'Cell Type' in system_data and system_data['Cell Type'] in ['Triclinic', 'Monoclinic']:
+        a = configuration.attrs['a']
+        b = configuration.attrs['b']
+        c = configuration.attrs['c']
+        alpha_deg = configuration.attrs['alpha']
+        beta_deg = configuration.attrs['beta']
+        gamma_deg = configuration.attrs['gamma']
+        box, box_inv = build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg)
+        def min_image_func(dr):
+            return minimum_image_distance_triclinic(dr, box, box_inv)
+    else:
+        # Default to original cubic approach
+        L = system_data['box length']
+        def min_image_func(dr):
+            return dr - np.round(dr / L) * L
+
+    positions = configuration[['X', 'Y', 'Z']].values
+    atom_types = configuration['Atom Type'].values
+    mol_ids = configuration['Molecule'].values
+    charges = np.array([force_field.loc[t, 'charge'] for t in atom_types])
+
+    n_atoms = len(positions)
+    real_energy = 0.0
+
+    for j in range(n_atoms - 1):
+        for l in range(j + 1, n_atoms):
+            # Skip intramolecular pairs
+            if mol_ids[j] == mol_ids[l]:
+                continue
+
+            r_ij = positions[l] - positions[j]
+            r_ij_mi = min_image_func(r_ij)
+            r = np.linalg.norm(r_ij_mi)
+            if 1e-14 < r < cutoff:
+                q_j = charges[j] * e_charge
+                q_l = charges[l] * e_charge
+                r_m = r * 1e-10
+                factor_erfc = erfc(alpha * r)
+                real_energy += coulomb_factor * (q_j * q_l / r_m) * factor_erfc
+
+    return real_energy
+
+def build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg):
+    alpha = math.radians(alpha_deg)
+    beta = math.radians(beta_deg)
+    gamma = math.radians(gamma_deg)
+    box = np.zeros((3, 3), dtype=float)
+
+    # box[0,0] = a
+    # box[0,1] = b cos(gamma)
+    # box[1,1] = b sin(gamma)
+    # For the z-component:
+    #   box[0,2] = c cos(beta)
+    #   box[1,2] = c( cos(alpha) - cos(beta)cos(gamma) ) / sin(gamma)
+    #   box[2,2] = c * sqrt( 1 - cos^2(alpha) - cos^2(beta)
+    #                        - cos^2(gamma) + 2cos(alpha)cos(beta)cos(gamma) ) / sin(gamma)
+
+    box[0,0] = a
+    box[0,1] = b * math.cos(gamma)
+    box[1,1] = b * math.sin(gamma)
+    box[0,2] = c * math.cos(beta)
+    box[1,2] = c * ( (math.cos(alpha) - math.cos(beta)*math.cos(gamma)) / math.sin(gamma) )
+
+    # Computation for box[2,2] using the standard formula
+    cos_alpha = math.cos(alpha)
+    cos_beta = math.cos(beta)
+    cos_gamma = math.cos(gamma)
+    sin_gamma = math.sin(gamma)
+    term = 1.0 - cos_alpha**2 - cos_beta**2 - cos_gamma**2 + 2.0*cos_alpha*cos_beta*cos_gamma
+    box[2,2] = c * math.sqrt(term) / sin_gamma
+
+    box_inv = np.linalg.inv(box)
+    return box, box_inv
+
+def compute_fourier_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23
+
+    alpha = system_data['alpha']
+    kmax = system_data['kmax']
+
+    # If we have triclinic or monoclinic, build box & reciprocal.
+    if 'Cell Type' in system_data and system_data['Cell Type'] in ['Triclinic', 'Monoclinic']:
+        a = configuration.attrs['a']
+        b = configuration.attrs['b']
+        c = configuration.attrs['c']
+        alpha_deg = configuration.attrs['alpha']
+        beta_deg = configuration.attrs['beta']
+        gamma_deg = configuration.attrs['gamma']
+        box, box_inv = build_box_matrix(a, b, c, alpha_deg, beta_deg, gamma_deg)
+        # The reciprocal box is 2*pi * (inv(box)^T)
+        reciprocal_box = 2.0 * math.pi * box_inv.T
+        # Volume in m^3:
+        # volume in A^3 = det(box), convert to m^3 by (1e-10)^3
+        volume_A3 = np.linalg.det(box)
+        V_m = volume_A3 * 1e-30
+    else:
+        L = system_data['box length']
+        # For a cubic cell, reciprocal vectors are multiples of 2*pi / L.
+        reciprocal_box = np.eye(3) * (2.0*math.pi / (L*1e-10))
+        V_m = (L*1e-10)**3
+
+    positions = configuration[['X', 'Y', 'Z']].values * 1e-10  # convert to meters
+    atom_types = configuration['Atom Type'].values
+    charges = np.array([force_field.loc[t, 'charge'] for t in atom_types])
+    charges_c = charges * e_charge
+
+    prefactor = coulomb_factor / (2.0 * V_m)
+    alpha_m = alpha * 1e10
+
+    fourier_energy = 0.0
+
+    # We'll generate integer ranges from -kmax..kmax for each dimension
+    # Then transform them via reciprocal_box to get the actual k-vector.
+    max_sq = kmax * kmax + 2
+
+    for kx in range(-kmax, kmax+1):
+        for ky in range(-kmax, kmax+1):
+            for kz in range(-kmax, kmax+1):
+                if kx == 0 and ky == 0 and kz == 0:
+                    continue
+                k_int = np.array([kx, ky, kz], dtype=float)
+                k_vec = np.dot(reciprocal_box, k_int)
+                k_sq = np.dot(k_vec, k_vec)
+                # Check k^2 < kmax^2 + 2 in integer space or in real k-vector? Here we do real k^2.
+                if k_sq < 1e-14:
+                    continue
+                # If needed, we can compare the integer magnitude, but we'll keep it as is.
+                if (kx*kx + ky*ky + kz*kz) >= max_sq:
+                    continue
+
+                real_part = 0.0
+                imag_part = 0.0
+                for j, (xj, yj, zj) in enumerate(positions):
+                    kr = k_vec[0]*xj + k_vec[1]*yj + k_vec[2]*zj
+                    real_part += charges_c[j]*math.cos(kr)
+                    imag_part += charges_c[j]*math.sin(kr)
+
+                sk_sq = real_part*real_part + imag_part*imag_part
+                exponent = math.exp(-k_sq/(4.0*(alpha_m**2)))
+                term = prefactor * (4.0 * math.pi / k_sq) * exponent * sk_sq
+                fourier_energy += term
+
+    return fourier_energy
+
+
+def compute_self_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23
+
+    alpha = system_data[""alpha""]
+    atom_types = configuration[""Atom Type""].values
+    charges = np.array([force_field.loc[t,""charge""] for t in atom_types])
+    charges_c = charges * e_charge
+
+    alpha_m = alpha*1e10
+
+    sum_q2 = np.sum(charges_c**2)
+
+    self_energy = - coulomb_factor * (alpha_m / math.sqrt(math.pi)) * sum_q2
+    return self_energy
+
+
+def compute_intra_energies(system_data, configuration, force_field):
+    e_charge = 1.602176634e-19
+    coulomb_factor = 8.9875517923e9 / 1.3806488e-23
+
+    alpha = system_data[""alpha""]
+    positions = configuration[[""X"", ""Y"", ""Z""]].values
+    atom_types = configuration[""Atom Type""].values
+    charges = np.array([force_field.loc[t,""charge""] for t in atom_types])
+    mol_ids = configuration[""Molecule""].values
+
+    alpha_dimless = alpha
+
+    intra_energy = 0.0
+    unique_mols = np.unique(mol_ids)
+
+    for m_id in unique_mols:
+        idxs = np.where(mol_ids == m_id)[0]
+        n_mol_atoms = len(idxs)
+        for i in range(n_mol_atoms - 1):
+            for j in range(i+1, n_mol_atoms):
+                idx_i = idxs[i]
+                idx_j = idxs[j]
+                dx = positions[idx_j,0] - positions[idx_i,0]
+                dy = positions[idx_j,1] - positions[idx_i,1]
+                dz = positions[idx_j,2] - positions[idx_i,2]
+                r = math.sqrt(dx*dx + dy*dy + dz*dz)
+                if r > 1e-14:
+                    q_i = charges[idx_i]*e_charge
+                    q_j = charges[idx_j]*e_charge
+                    r_m = r*1e-10
+                    erf_val = erf(alpha_dimless*r)
+                    val = coulomb_factor*(q_i*q_j / r_m)*erf_val
+                    intra_energy -= val
+
+    return intra_energy
+
+
+# DataFrame Descriptions:
+
+# 1. NIST_TRICLINIC_SPC_E_Water DataFrame:
+#    - Contains thermodynamic properties of SPC/E water configurations in both triclinic and monoclinic cells.
+#    - Columns:
+#        - 'Configuration' (int): Configuration ID (1-4).
+#        - 'M (number of SPC/E molecules)' (int): Number of SPC/E molecules in the system.
+#        - 'Cell Type' (str): Type of the cell (e.g., Triclinic, Monoclinic).
+#        - 'Cell Side Lengths [a, b, c] (Å)' (list of strings): Cell side lengths in Ångströms.
+#        - 'Cell Angles [α, β, γ] (degrees)' (list of strings): Cell angles in degrees.
+#        - 'Number of Wave Vectors' (int): The number of wave vectors for each configuration.
+#        - 'Edisp/kB (K)' (float): Dispersion energy in Kelvin.
+#        - 'ELRC/kB (K)' (float): Long-range correction energy in Kelvin.
+#        - 'Ereal/kB (K)' (float): Real energy in Kelvin.
+#        - 'Efourier/kB (K)' (float): Fourier transform energy in Kelvin.
+#        - 'Eself/kB (K)' (float): Self-interaction energy in Kelvin.
+#        - 'Eintra/kB (K)' (float): Intra-molecular energy in Kelvin.
+#        - 'Etotal/kB (K)' (float): Total energy in Kelvin.
+
+# 2. force_field DataFrame:
+#    - Contains force field parameters for SPC/E water, specifically for oxygen ('O') and hydrogen ('H').
+#    - Columns:
+#        - 'type' (str): Atom type ('O' or 'H').
+#        - 'sigma' (float): Lennard-Jones parameter (Å).
+#        - 'epsilon' (float): Lennard-Jones well depth (K).
+#        - 'charge' (float): Partial charge (e).
+#        - 'num_particles' (int): Number of particles per molecule.
+
+# 3. system DataFrame:
+#    - Contains metadata about each system configuration.
+#    - Columns:
+#        - 'file_paths' (str): File names containing atomic configurations.
+#        - 'configuration #' (int): Extracted configuration number (1-4).
+#        - 'number of particles' (float): Number of molecules (from 'NIST_SPC_E_Water').
+#        - 'box length' (float): Box dimensions (from 'NIST_SPC_E_Water').
+#        - 'cutoff' (int): Fixed cutoff distance for interactions (10 Å).
+#        - 'alpha' (float): Ewald summation parameter (5.6 / min(a, b, c)).
+#        - 'kmax' (int): Maximum wave vector index (5); also, only include k for which k² < kmax² + 2, i.e., k² < 27.
+#        - 'ε0' (float): Permittivity of Vacuum (8.854187817E-12 C²/(J m)).
+#        - 'kB' (float): Boltzmann Constant (1.3806488E-23 J/K).
+
+# 4. configuration DataFrame (from 'extracting_positions'):
+#    - Created per file, containing atomic positions.
+#    - Columns:
+#        - 'X' (float): Atom coordinates in Ångströms.
+#        - 'Y' (float): Atom coordinates in Ångströms.
+#        - 'Z' (float): Atom coordinates in Ångströms.
+#        - 'Atom Type' (str): Type of atom ('O' or 'H').
+#        - 'Molecule' (int): Molecule index assigned based on position.
+
+
+system, force_field, NIST_TRICLINIC_SPC_E_Water = creating_dataframes(file_paths, atom_properties,NIST_TRICLINIC_SPC_E_Water)
+
+# Computing energies storing in results
+results = pd.DataFrame()
+
+results['Number of Particles'] = system['number of particles'].astype(int)
+
+# Calculate LRC energy for all system configurations
+results['lrc_Energies'] = system.apply(
+    lambda row: compute_lrc_energy(row, force_field), axis=1
+)
+
+# Calculate pairwise energy for all system configurations
+results['dispersion_energies'] = system['file_paths'].apply(
+    lambda file_path: pair_dispersion_energy(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path), 
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['real_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_real_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['fourier_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_fourier_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['self_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_self_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+# Calculate pairwise energy for all system configurations
+results['intra_energies'] = system['file_paths'].apply(
+    lambda file_path: compute_intra_energies(
+        system[system['file_paths'] == file_path].iloc[0],  # Ensure single row selection
+        extracting_positions(file_path),
+        force_field
+    )
+)
+
+def compare_LJ_coulomb_energy(df1, df2, tolerance=1e-4):
+    # Merge df1 and df2 based on the number of particles
+    df_merged = df1.merge(df2, left_on='Number of Particles', right_on='M (number of SPC/E molecules)', how='left')
+
+    # Initialize counters
+    matched_real = matched_fourier = matched_self = matched_intra = 0
+    matched_dispersion = matched_lrc = 0
+    not_matched_real = not_matched_fourier = not_matched_self = not_matched_intra = 0
+    not_matched_dispersion = not_matched_lrc = 0
+
+    # Initialize output lists
+    real_energy_output, fourier_energy_output = [], []
+    self_energy_output, intra_energy_output = [], []
+    lrc_energy_output, dispersion_energy_output = [], []
+
+    # Iterate over merged DataFrame
+    for idx, row in df_merged.iterrows():
+        # Extract computed values from df1
+        real_energy = row['real_energies']
+        fourier_energy = row['fourier_energies']
+        self_energy = row['self_energies']
+        intra_energy = row['intra_energies']
+        num_molecules = row['Number of Particles']
+        # LJ Components
+        lrc_energy = row['lrc_Energies']
+        dispersion_energy = row['dispersion_energies']
+
+        # Extract reference values from df2
+        if pd.isna(row['Ereal/kB (K)']):
+            continue  # Skip if no match is found in df2
+
+        nist_real_energy = float(row['Ereal/kB (K)'])
+        nist_fourier_energy = float(row['Efourier/kB (K)'])
+        nist_self_energy = float(row['Eself/kB (K)'])
+        nist_intra_energy = float(row['Eintra/kB (K)'])
+        nist_lrc_energy = float(row['ELRC/kB (K)'])
+        nist_dispersion_energy = float(row['Edisp/kB (K)'])
+
+        # Perform numeric comparisons with a tolerance
+        match_real = np.isclose(real_energy, nist_real_energy, atol=tolerance)
+        match_fourier = np.isclose(fourier_energy, nist_fourier_energy, atol=tolerance)
+        match_self = np.isclose(self_energy, nist_self_energy, atol=tolerance)
+        match_intra = np.isclose(intra_energy, nist_intra_energy, atol=tolerance)
+
+        # Perform numeric comparisons with a tolerance
+        match_dispersion = np.isclose(dispersion_energy, nist_dispersion_energy, atol=tolerance)
+        match_lrc = np.isclose(lrc_energy, nist_lrc_energy, atol=tolerance)
+
+        matched_real += int(match_real)
+        not_matched_real += int(not match_real)
+
+        matched_fourier += int(match_fourier)
+        not_matched_fourier += int(not match_fourier)
+
+        matched_self += int(match_self)
+        not_matched_self += int(not match_self)
+
+        matched_intra += int(match_intra)
+        not_matched_intra += int(not match_intra)
+
+        matched_dispersion += int(match_dispersion)
+        not_matched_dispersion += int(not match_dispersion)
+
+        matched_lrc += int(match_lrc)
+        not_matched_lrc += int(not match_lrc)
+
+        # Store formatted outputs
+        dispersion_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {dispersion_energy:.4E}, NIST: {nist_dispersion_energy:.4E}, Match: {match_dispersion}"")
+        lrc_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {lrc_energy:.4E}, NIST: {nist_lrc_energy:.4E}, Match: {match_lrc}"")
+        real_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {real_energy:.4E}, NIST: {nist_real_energy:.4E}, Match: {match_real}"")
+        fourier_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {fourier_energy:.4E}, NIST: {nist_fourier_energy:.4E}, Match: {match_fourier}"")
+        self_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {self_energy:.4E}, NIST: {nist_self_energy:.4E}, Match: {match_self}"")
+        intra_energy_output.append(f""Test {idx+1} ({num_molecules} molecules): Computed: {intra_energy:.4E}, NIST: {nist_intra_energy:.4E}, Match: {match_intra}"")
+
+    # Print final results
+    print()
+    print(""Lennard-Jones Pair Dispersion Energy Comparison:"")
+    print(*dispersion_energy_output, sep=chr(10))
+    print(""Lennard-Jones long-range corrections Energy Comparison:"")
+    print(*lrc_energy_output, sep=chr(10))
+    print(""Real Energy Comparison:"")
+    print(*real_energy_output, sep=chr(10))
+    print(""Fourier Energy Comparison:"")
+    print(*fourier_energy_output, sep=chr(10))
+    print(""Self Energy Comparison:"")
+    print(*self_energy_output, sep=chr(10))
+    print(""Intra Energy Comparison:"")
+    print(*intra_energy_output, sep=chr(10))
+    print()
+    print(f""Count of correct pairwise answers: {matched_dispersion}"")
+    print(f""Count of incorrect pairwise answers: {not_matched_dispersion}"")
+    print(f""Count of correct LRC answers: {matched_lrc}"")
+    print(f""Count of incorrect LRC answers: {not_matched_lrc}"")
+    print(f""Count of correct Real Energy answers: {matched_real}"")
+    print(f""Count of incorrect Real Energy answers: {not_matched_real}"")
+    print(f""Count of correct Fourier Energy answers: {matched_fourier}"")
+    print(f""Count of incorrect Fourier Energy answers: {not_matched_fourier}"")
+    print(f""Count of correct Self Energy answers: {matched_self}"")
+    print(f""Count of incorrect Self Energy answers: {not_matched_self}"")
+    print(f""Count of correct Intra Energy answers: {matched_intra}"")
+    print(f""Count of incorrect Intra Energy answers: {not_matched_intra}"")
+    print()
+
+    total_correct = matched_real + matched_fourier + matched_self + matched_intra + matched_dispersion + matched_lrc
+    total_incorrect = not_matched_real + not_matched_fourier + not_matched_self + not_matched_intra + not_matched_dispersion + not_matched_lrc
+
+    print(f""Total correct answers: {total_correct}"")
+    print(f""Total incorrect answers: {total_incorrect}"")
+
+
+# calling compare_coulomb_energy function
+compare_LJ_coulomb_energy(results, NIST_TRICLINIC_SPC_E_Water)"

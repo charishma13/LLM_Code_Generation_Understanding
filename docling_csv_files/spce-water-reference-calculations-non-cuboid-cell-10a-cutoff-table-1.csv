@@ -1,0 +1,17 @@
+,0,1
+0,n,Lattice vector of periodic cell images
+1,k,Fourier-space vector of periodic cell images
+2,k,modulus of k ; k2 = |k|2
+3,qj,Value of charge at site j
+4,α,Ewald damping parameter
+5,N,Total number of charged sites
+6,M,Total number of molecules
+7,Nj,Total number of charged sites in molecule j
+8,"κ, λ",Indices of sites in a single molecule
+9,V,"Volume of the simulation cell, LxLyLz"
+10,ε0,Permittivity of vacuum (see below)
+11,i,"Imaginary unit, (-1)1/2"
+12,rj,Cartesian vector coordinate of site j
+13,rjl,rj -rl
+14,erf(x),Error Function computed for abscissa x
+15,erfc(x),Complimentary Error Function computed for abscissa x

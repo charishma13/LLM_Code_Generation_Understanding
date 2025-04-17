@@ -1,0 +1,4 @@
+services:
+  app:
+    environment:
+      - USER_AGENT=MyLangChainApp/1.0

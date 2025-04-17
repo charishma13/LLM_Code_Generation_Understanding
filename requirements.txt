@@ -1,0 +1,7 @@
+python-dotenv
+langchain_openai
+langchain_chroma
+langchain_community
+langgraph
+langgraph.prebuilt
+langchain-docling
